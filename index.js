@@ -1,5 +1,5 @@
 import express from 'express';
-import puppeteer from 'puppeteer';
+import fetch from 'node-fetch';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,38 +17,53 @@ function getPlaylistUrl(id) {
   return `https://www.youtube.com/playlist?list=${id}`;
 }
 
-let episodes = [];
+async function scrapePlaylist(playlistId) {
+  const url = getPlaylistUrl(playlistId);
+  const res = await fetch(url);
+  const html = await res.text();
 
-async function scrapePlaylist(url) {
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  // Extract ytInitialData JSON blob from page source
+  const initialDataMatch = html.match(/var ytInitialData = (.+?);\n/);
+  if (!initialDataMatch) {
+    console.error('Failed to find ytInitialData');
+    return [];
+  }
+
+  let initialData;
+  try {
+    initialData = JSON.parse(initialDataMatch[1]);
+  } catch (e) {
+    console.error('Failed to parse ytInitialData JSON', e);
+    return [];
+  }
+
+  // Navigate through JSON to find playlist videos info
+  const videoItems =
+    initialData?.contents?.twoColumnBrowseResultsRenderer?.tabs[0]?.tabRenderer
+      ?.content?.sectionListRenderer?.contents[0]?.itemSectionRenderer?.contents[0]
+      ?.playlistVideoListRenderer?.contents || [];
+
+  const episodes = videoItems.map((item) => {
+    const video = item.playlistVideoRenderer;
+    return {
+      videoId: video.videoId,
+      title: video.title.runs[0].text,
+      thumbnail: video.thumbnail.thumbnails.pop().url,
+      publishedAt: video.publishedTimeText?.simpleText || '',
+      length: video.lengthText?.simpleText || '',
+    };
   });
-  const page = await browser.newPage();
-  await page.goto(url, { waitUntil: 'networkidle2' });
 
-  const playlistEpisodes = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('ytd-playlist-video-renderer')).map(el => {
-      const titleEl = el.querySelector('#video-title');
-      const thumbnailEl = el.querySelector('img#img');
-
-      return {
-        title: titleEl?.textContent.trim() || '',
-        videoId: titleEl?.href?.split('v=')[1]?.split('&')[0] || '',
-        thumbnail: thumbnailEl?.src || ''
-      };
-    });
-  });
-
-  await browser.close();
-  return playlistEpisodes;
+  return episodes;
 }
+
+let episodes = [];
 
 async function updateAllEpisodes() {
   let allEpisodes = [];
   for (const id of PLAYLIST_IDS) {
     try {
-      const url = getPlaylistUrl(id);
-      const eps = await scrapePlaylist(url);
+      const eps = await scrapePlaylist(id);
       allEpisodes = allEpisodes.concat(eps);
     } catch (err) {
       console.error(`Failed scraping playlist ${id}:`, err);
@@ -56,16 +71,15 @@ async function updateAllEpisodes() {
   }
 
   // Remove duplicates by videoId
-  const uniqueEpisodes = [];
   const seen = new Set();
-  for (const ep of allEpisodes) {
-    if (ep.videoId && !seen.has(ep.videoId)) {
+  episodes = allEpisodes.filter((ep) => {
+    if (!seen.has(ep.videoId)) {
       seen.add(ep.videoId);
-      uniqueEpisodes.push(ep);
+      return true;
     }
-  }
+    return false;
+  });
 
-  episodes = uniqueEpisodes;
   console.log(`Scraped ${episodes.length} episodes.`);
 }
 
