@@ -23,19 +23,21 @@ async function scrapePlaylist(playlistId) {
   const html = await res.text();
 
   // Extract ytInitialData JSON blob from page source
-  const initialDataMatch = html.match(/var ytInitialData = (.+?);\n/);
-  if (!initialDataMatch) {
-    console.error('Failed to find ytInitialData');
-    return [];
-  }
 
-  let initialData;
-  try {
-    initialData = JSON.parse(initialDataMatch[1]);
-  } catch (e) {
-    console.error('Failed to parse ytInitialData JSON', e);
-    return [];
-  }
+const initialDataMatch = html.match(/ytInitialData\s*=\s*(\{.+?\});/s);
+if (!initialDataMatch) {
+  console.error('Failed to find ytInitialData in HTML. Check if YouTube changed the page.');
+  return [];
+}
+
+let initialData;
+try {
+  initialData = JSON.parse(initialDataMatch[1]);
+} catch (e) {
+  console.error('Failed to parse ytInitialData JSON', e);
+  return [];
+}
+
 
   // Navigate through JSON to find playlist videos info
   const videoItems =
