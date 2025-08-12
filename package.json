@@ -1,0 +1,17 @@
+{
+  "name": "bfdi_Updated_Runtime",
+  "version": "1.0.0",
+  "description": "Server to fetch BFDI episodes data from YouTube playlists",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
