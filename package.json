@@ -1,17 +1,16 @@
 {
-  "name": "bfdi_Updated_Runtime",
+  "name": "bfdi_updated_runtime",
   "version": "1.0.0",
-  "description": "Server to fetch BFDI episodes data from YouTube playlists",
+  "description": "BFDI episodes scraper and server",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js"
   },
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
-  },
-  "engines": {
-    "node": ">=16"
+    "puppeteer": "^21.3.8"
   }
 }
