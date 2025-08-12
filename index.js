@@ -1,11 +1,9 @@
-// server.js (or your main server file)
 import express from 'express';
-import fetch from 'node-fetch';
+import puppeteer from 'puppeteer';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const API_KEY = process.env.YT_API_KEY; // store in Render environment variable
 const PLAYLIST_IDS = [
   'PLbDP9HpqeU_OJlQc0ym7ELpgep5o648VF', // Season 1
   'PLbDP9HpqeU_Ntqqnfprn1RemanAZFn_v8', // Season 2
@@ -15,60 +13,68 @@ const PLAYLIST_IDS = [
   'PLbDP9HpqeU_OX4K6rmeVfocfbrZdt5rx0', // Season 5
 ];
 
-async function fetchPlaylistItems(playlistId) {
-  let results = [];
-  let nextPageToken = '';
-
-  do {
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}&key=${API_KEY}&pageToken=${nextPageToken}`
-    );
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
-    results = results.concat(data.items);
-    nextPageToken = data.nextPageToken || '';
-  } while (nextPageToken);
-
-  return results;
+function getPlaylistUrl(id) {
+  return `https://www.youtube.com/playlist?list=${id}`;
 }
 
-async function fetchVideoDetails(videoIds) {
-  const res = await fetch(
-    `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoIds.join(',')}&key=${API_KEY}`
-  );
-  const data = await res.json();
-  return data.items;
+let episodes = [];
+
+async function scrapePlaylist(url) {
+  const browser = await puppeteer.launch({
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: 'networkidle2' });
+
+  const playlistEpisodes = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('ytd-playlist-video-renderer')).map(el => {
+      const titleEl = el.querySelector('#video-title');
+      const thumbnailEl = el.querySelector('img#img');
+
+      return {
+        title: titleEl?.textContent.trim() || '',
+        videoId: titleEl?.href?.split('v=')[1]?.split('&')[0] || '',
+        thumbnail: thumbnailEl?.src || ''
+      };
+    });
+  });
+
+  await browser.close();
+  return playlistEpisodes;
 }
 
-app.get('/episodes', async (req, res) => {
-  try {
-    let allEpisodes = [];
-
-    for (let pid of PLAYLIST_IDS) {
-      const playlistItems = await fetchPlaylistItems(pid);
-      const videoIds = playlistItems.map(item => item.contentDetails.videoId);
-      const videoDetails = await fetchVideoDetails(videoIds);
-
-      const eps = videoDetails.map(v => ({
-        title: v.snippet.title,
-        date: v.snippet.publishedAt,
-        length: v.contentDetails.duration, // ISO 8601 format (e.g. PT3M12S)
-        thumbnail: v.snippet.thumbnails.medium.url,
-      }));
-
+async function updateAllEpisodes() {
+  let allEpisodes = [];
+  for (const id of PLAYLIST_IDS) {
+    try {
+      const url = getPlaylistUrl(id);
+      const eps = await scrapePlaylist(url);
       allEpisodes = allEpisodes.concat(eps);
+    } catch (err) {
+      console.error(`Failed scraping playlist ${id}:`, err);
     }
-
-    // Sort by date
-    allEpisodes.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    res.json(allEpisodes);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
   }
+
+  // Remove duplicates by videoId
+  const uniqueEpisodes = [];
+  const seen = new Set();
+  for (const ep of allEpisodes) {
+    if (ep.videoId && !seen.has(ep.videoId)) {
+      seen.add(ep.videoId);
+      uniqueEpisodes.push(ep);
+    }
+  }
+
+  episodes = uniqueEpisodes;
+  console.log(`Scraped ${episodes.length} episodes.`);
+}
+
+app.get('/episodes', (req, res) => {
+  res.json(episodes);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  await updateAllEpisodes();
+  console.log('Initial scrape done.');
 });
